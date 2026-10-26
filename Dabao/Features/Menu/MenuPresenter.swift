@@ -19,6 +19,9 @@ final class MenuPresenter: MenuPresenterProtocol, MenuInteractorOutputProtocol {
         self.router = router
     }
 
+    // Avoids the main-actor isolated-deinit path, which crashes the iOS 26.0 runtime.
+    nonisolated deinit {}
+
     // MARK: MenuPresenterProtocol (from the view)
 
     func viewDidLoad() {
