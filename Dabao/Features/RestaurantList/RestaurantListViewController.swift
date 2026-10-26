@@ -9,6 +9,8 @@ final class RestaurantListViewController: UIViewController {
     private let service: RestaurantServicing
     private var restaurants: [Restaurant] = []
     private var filteredRestaurants: [Restaurant] = []
+    private var showOpenOnly = false
+    private var sortOption: RestaurantSort = .standard
     private let searchController = UISearchController(searchResultsController: nil)
 
     private nonisolated enum Section: Hashable, Sendable { case main }
@@ -33,6 +35,7 @@ final class RestaurantListViewController: UIViewController {
         view.backgroundColor = .systemBackground
 
         setUpSearch()
+        updateFilterMenu()
         setUpTableView()
         setUpSpinner()
         loadRestaurants()
@@ -48,19 +51,44 @@ final class RestaurantListViewController: UIViewController {
     }
 
     private func applyFilter() {
-        let query = (searchController.searchBar.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if query.isEmpty {
-            filteredRestaurants = restaurants
-        } else {
-            filteredRestaurants = restaurants.filter {
-                $0.name.localizedCaseInsensitiveContains(query) ||
-                $0.cuisine.localizedCaseInsensitiveContains(query)
-            }
-        }
+        filteredRestaurants = RestaurantFilter.apply(to: restaurants,
+                                                     query: searchController.searchBar.text ?? "",
+                                                     openOnly: showOpenOnly,
+                                                     sort: sortOption)
         var snapshot = NSDiffableDataSourceSnapshot<Section, Restaurant>()
         snapshot.appendSections([.main])
         snapshot.appendItems(filteredRestaurants)
         dataSource.apply(snapshot, animatingDifferences: true)
+    }
+
+    private func updateFilterMenu() {
+        let openNow = UIAction(title: "Open now",
+                               state: showOpenOnly ? .on : .off) { [weak self] _ in
+            guard let self else { return }
+            self.showOpenOnly.toggle()
+            self.refreshFilters()
+        }
+        let sortActions = RestaurantSort.allCases.map { option in
+            UIAction(title: option.title,
+                     state: option == sortOption ? .on : .off) { [weak self] _ in
+                guard let self else { return }
+                self.sortOption = option
+                self.refreshFilters()
+            }
+        }
+        let sortMenu = UIMenu(title: "Sort by", options: .displayInline, children: sortActions)
+
+        let isActive = showOpenOnly || sortOption != .standard
+        let icon = isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle"
+        let item = UIBarButtonItem(image: UIImage(systemName: icon),
+                                   menu: UIMenu(children: [openNow, sortMenu]))
+        item.accessibilityLabel = "Filter and sort"
+        navigationItem.rightBarButtonItem = item
+    }
+
+    private func refreshFilters() {
+        updateFilterMenu()
+        applyFilter()
     }
 
     private func makeDataSource() -> UITableViewDiffableDataSource<Section, Restaurant> {
