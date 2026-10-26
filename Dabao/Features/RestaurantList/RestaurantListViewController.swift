@@ -8,8 +8,15 @@ final class RestaurantListViewController: UIViewController {
 
     private let service: RestaurantServicing
     private var restaurants: [Restaurant] = []
+    private var filteredRestaurants: [Restaurant] = []
+    private var showOpenOnly = false
+    private var sortOption: RestaurantSort = .standard
+    private let searchController = UISearchController(searchResultsController: nil)
+
+    private nonisolated enum Section: Hashable, Sendable { case main }
 
     private let tableView = UITableView(frame: .zero, style: .plain)
+    private lazy var dataSource = makeDataSource()
     private let spinner = UIActivityIndicatorView(style: .large)
 
     init(service: RestaurantServicing = RestaurantService()) {
@@ -27,16 +34,77 @@ final class RestaurantListViewController: UIViewController {
         navigationController?.navigationBar.prefersLargeTitles = true
         view.backgroundColor = .systemBackground
 
+        setUpSearch()
+        updateFilterMenu()
         setUpTableView()
         setUpSpinner()
         loadRestaurants()
     }
 
+    private func setUpSearch() {
+        searchController.searchResultsUpdater = self
+        searchController.obscuresBackgroundDuringPresentation = false
+        searchController.searchBar.placeholder = "Search by name or cuisine"
+        navigationItem.searchController = searchController
+        navigationItem.hidesSearchBarWhenScrolling = false
+        definesPresentationContext = true
+    }
+
+    private func applyFilter() {
+        filteredRestaurants = RestaurantFilter.apply(to: restaurants,
+                                                     query: searchController.searchBar.text ?? "",
+                                                     openOnly: showOpenOnly,
+                                                     sort: sortOption)
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Restaurant>()
+        snapshot.appendSections([.main])
+        snapshot.appendItems(filteredRestaurants)
+        dataSource.apply(snapshot, animatingDifferences: true)
+    }
+
+    private func updateFilterMenu() {
+        let openNow = UIAction(title: "Open now",
+                               state: showOpenOnly ? .on : .off) { [weak self] _ in
+            guard let self else { return }
+            self.showOpenOnly.toggle()
+            self.refreshFilters()
+        }
+        let sortActions = RestaurantSort.allCases.map { option in
+            UIAction(title: option.title,
+                     state: option == sortOption ? .on : .off) { [weak self] _ in
+                guard let self else { return }
+                self.sortOption = option
+                self.refreshFilters()
+            }
+        }
+        let sortMenu = UIMenu(title: "Sort by", options: .displayInline, children: sortActions)
+
+        let isActive = showOpenOnly || sortOption != .standard
+        let icon = isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle"
+        let item = UIBarButtonItem(image: UIImage(systemName: icon),
+                                   menu: UIMenu(children: [openNow, sortMenu]))
+        item.accessibilityLabel = "Filter and sort"
+        navigationItem.rightBarButtonItem = item
+    }
+
+    private func refreshFilters() {
+        updateFilterMenu()
+        applyFilter()
+    }
+
+    private func makeDataSource() -> UITableViewDiffableDataSource<Section, Restaurant> {
+        UITableViewDiffableDataSource(tableView: tableView) { tableView, indexPath, restaurant in
+            let cell = tableView.dequeueReusableCell(withIdentifier: RestaurantCell.reuseIdentifier,
+                                                     for: indexPath) as! RestaurantCell
+            cell.configure(with: restaurant)
+            return cell
+        }
+    }
+
     private func setUpTableView() {
         tableView.translatesAutoresizingMaskIntoConstraints = false
-        tableView.dataSource = self
         tableView.delegate = self
         tableView.register(RestaurantCell.self, forCellReuseIdentifier: RestaurantCell.reuseIdentifier)
+        tableView.dataSource = dataSource
         tableView.rowHeight = 88
         view.addSubview(tableView)
 
@@ -66,7 +134,7 @@ final class RestaurantListViewController: UIViewController {
             switch result {
             case .success(let restaurants):
                 self.restaurants = restaurants
-                self.tableView.reloadData()
+                self.applyFilter()
             case .failure:
                 self.showError()
             }
@@ -82,25 +150,20 @@ final class RestaurantListViewController: UIViewController {
     }
 }
 
-extension RestaurantListViewController: UITableViewDataSource, UITableViewDelegate {
-
-    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        restaurants.count
-    }
-
-    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: RestaurantCell.reuseIdentifier,
-                                                 for: indexPath) as! RestaurantCell
-        cell.configure(with: restaurants[indexPath.row])
-        return cell
-    }
+extension RestaurantListViewController: UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        let restaurant = restaurants[indexPath.row]
+        let restaurant = filteredRestaurants[indexPath.row]
 
         // The Menu screen is a VIPER module. We ask its router to build it for us.
         let menu = MenuRouter.createModule(restaurant: restaurant, cart: CartStore.shared)
         navigationController?.pushViewController(menu, animated: true)
+    }
+}
+
+extension RestaurantListViewController: UISearchResultsUpdating {
+    func updateSearchResults(for searchController: UISearchController) {
+        applyFilter()
     }
 }
