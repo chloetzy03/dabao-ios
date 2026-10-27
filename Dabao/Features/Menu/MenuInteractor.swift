@@ -10,9 +10,27 @@ final class MenuInteractor: MenuInteractorInputProtocol {
     private let restaurant: Restaurant
     private let cart: CartStore
 
+    nonisolated(unsafe) private var cartObserver: NSObjectProtocol?
+
     init(restaurant: Restaurant, cart: CartStore) {
         self.restaurant = restaurant
         self.cart = cart
+        cartObserver = NotificationCenter.default.addObserver(
+            forName: CartStore.didChangeNotification,
+            object: cart,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.output?.didUpdateCart(self.currentSummary())
+            }
+        }
+    }
+
+    deinit {
+        if let cartObserver {
+            NotificationCenter.default.removeObserver(cartObserver)
+        }
     }
 
     func loadMenu() {
